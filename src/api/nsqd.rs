@@ -1,16 +1,26 @@
 use reqwest::{Client, Response, Error};
 use super::helper::*;
 
+pub struct NsqdConfig {
+
+}
+
 pub struct Nsqd {
     instance: Client,
-    base_url: String
+    base_url: String,
+    pub broadcast_address: String,
+    pub tcp_port: u16,
+    pub opts: NsqdConfig
 }
 
 impl Nsqd {
-    pub fn new(lookupd: Option<String>) -> Self {
+    pub fn new(broadcast_address: String, tcp_port: u16, opts: NsqdConfig) -> Self {
         Nsqd {
             instance: create_request_instance(),
-            base_url: lookupd.unwrap_or("default".to_string())
+            base_url: format!("http://{}:{}", broadcast_address, tcp_port),
+            broadcast_address,
+            tcp_port,
+            opts
         }
     }
 

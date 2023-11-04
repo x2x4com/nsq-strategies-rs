@@ -11,10 +11,10 @@ pub struct LookupdCluster {
 }
 
 impl LookupdCluster {
-    pub fn new(addresses: Vec<&str>) -> Self {
+    pub fn new(addresses: Vec<String>) -> Self {
         LookupdCluster {
             _lookupds: addresses.into_iter()
-                                .map(|address| Lookupd::new(Some(to_url(address.to_string()))))
+                                .map(|address| Lookupd::new(Some(to_url(address))))
                                 .collect()
         }
         

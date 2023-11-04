@@ -11,6 +11,6 @@ popd
 pushd ${DIR}/${NSQ_DOCKERS}
 
 # Start the services.
-docker-compose down
+docker compose down
 
 popd
