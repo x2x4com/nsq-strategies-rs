@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use crate::api::{nsqd::{Nsqd, NsqdConfig}, lookupd_cluster::LookupdCluster};
+use tokio_nsq::{NSQProducerConfig, NSQTopic, NSQEvent};
 
 #[derive(Clone, Debug)]
 pub enum ProducerStrategy {
@@ -73,7 +74,8 @@ impl Producer {
     }
 
     fn connect_nsqd(&self, nsqd_host: &str, nsqd_port: u16, opts: NsqdConfig) {
-
+        // https://docs.rs/tokio-nsq/latest/tokio_nsq/struct.NSQProducer.html
+        let producer = NSQProducerConfig::new(format!("{}:{}", nsqd_host, nsqd_port)).build();
     }
 
     fn reconnect_nsqd(&self, nsqd_host: &str, nsqd_port: u16, opts: NsqdConfig) {
@@ -91,4 +93,6 @@ impl Producer {
     pub fn close_all(&self) {
 
     }
+
+    
 }
