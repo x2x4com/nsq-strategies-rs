@@ -10,11 +10,11 @@ pub struct Nsqd {
     base_url: String,
     pub broadcast_address: String,
     pub tcp_port: u16,
-    pub opts: NsqdConfig
+    pub opts: Option<tokio_nsq::NSQConfigShared>
 }
 
 impl Nsqd {
-    pub fn new(broadcast_address: String, tcp_port: u16, opts: NsqdConfig) -> Self {
+    pub fn new(broadcast_address: String, tcp_port: u16, opts: Option<tokio_nsq::NSQConfigShared>) -> Self {
         Nsqd {
             instance: create_request_instance(),
             base_url: format!("http://{}:{}", broadcast_address, tcp_port),
