@@ -4,22 +4,26 @@ use super::helper::*;
 pub struct NsqdConfig {
 
 }
-
+#[derive(Clone)]
 pub struct Nsqd {
     instance: Client,
     base_url: String,
     pub broadcast_address: String,
     pub tcp_port: u16,
+    pub http_port: Option<u16>,
+    pub version: Option<String>,
     pub opts: Option<tokio_nsq::NSQConfigShared>
 }
 
 impl Nsqd {
-    pub fn new(broadcast_address: String, tcp_port: u16, opts: Option<tokio_nsq::NSQConfigShared>) -> Self {
+    pub fn new(broadcast_address: String, tcp_port: u16, http_port: Option<u16>, version: Option<String>, opts: Option<tokio_nsq::NSQConfigShared>) -> Self {
         Nsqd {
             instance: create_request_instance(),
             base_url: format!("http://{}:{}", broadcast_address, tcp_port),
             broadcast_address,
             tcp_port,
+            version,
+            http_port,
             opts
         }
     }

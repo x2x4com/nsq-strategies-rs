@@ -66,7 +66,7 @@ impl Producer {
         } else {
             Producer {
                 opts: opts.clone(),
-                nsqd: Some(Nsqd::new(opts.nsqd_host.unwrap(), opts.nsqd_port.unwrap(), nsqd_opts)),
+                nsqd: Some(Nsqd::new(opts.nsqd_host.unwrap(), opts.nsqd_port.unwrap(), None, None, nsqd_opts)),
                 lookup_cluster: None,
                 counter: Arc::new(Mutex::new(0)),
                 conns: Vec::new(),
@@ -79,8 +79,15 @@ impl Producer {
         match self.lookup_cluster {
             Some(ref lookup_cluster) => {
                 let nodes = lookup_cluster.nodes().await;
-                // TODO: connect one by one
-
+                
+                for node in nodes {
+                    if let Some(nsqd) = self.nsqd.as_ref() {
+                        if let Some(conn) = self.connect_nsqd(node.broadcast_address.as_str(), nsqd.tcp_port, None).await {
+                            self.conns.push(conn);
+                        }
+                    }
+                }
+                
             },
             None => {
                 if let Some(nsqd) = self.nsqd.as_ref() {
