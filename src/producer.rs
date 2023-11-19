@@ -1,6 +1,9 @@
+#![allow(dead_code, unused_variables)]
 use std::sync::{Arc, Mutex};
-use crate::api::{nsqd::{Nsqd, NsqdConfig}, lookupd_cluster::LookupdCluster};
 use tokio_nsq::{NSQProducerConfig, NSQProducer, NSQEvent, NSQConfigShared};
+use anyhow::Result;
+
+use crate::api::{nsqd::Nsqd, lookupd_cluster::LookupdCluster};
 
 #[derive(Clone, Debug)]
 pub enum ProducerStrategy {
@@ -16,6 +19,14 @@ impl ProducerStrategy {
         }
     }
 }
+
+
+pub struct ProducerConn {
+    pub broadcast_address: String,
+    pub tcp_port: u16,
+    pub conn: NSQProducer
+}
+
 #[derive(Clone, Debug)]
 pub struct ProducerConfig {
     pub strategy: ProducerStrategy,
@@ -47,7 +58,7 @@ pub struct Producer {
     nsqd: Option<Nsqd>,
     lookup_cluster: Option<LookupdCluster>,
     pub counter: Arc<Mutex<u64>>,
-    conns: Vec<NSQProducer>,
+    conns: Vec<ProducerConn>,
     is_closed: bool,
 
 }
@@ -78,21 +89,18 @@ impl Producer {
     pub async fn connect(&mut self) {
         match self.lookup_cluster {
             Some(ref lookup_cluster) => {
-                let nodes = lookup_cluster.nodes().await;
                 
-                for node in nodes {
-                    if let Some(nsqd) = self.nsqd.as_ref() {
-                        if let Some(conn) = self.connect_nsqd(node.broadcast_address.as_str(), nsqd.tcp_port, None).await {
-                            self.conns.push(conn);
-                        }
+                for node in lookup_cluster.nodes().await {
+                    if let Some(conn) = self.connect_nsqd(node.broadcast_address.as_str(), node.tcp_port, None).await {
+                        self.conns.push(ProducerConn { broadcast_address: node.broadcast_address.clone(), tcp_port: node.tcp_port, conn });
                     }
                 }
-                
+
             },
             None => {
                 if let Some(nsqd) = self.nsqd.as_ref() {
                     if let Some(conn) = self.connect_nsqd(nsqd.broadcast_address.as_str(), nsqd.tcp_port, None).await {
-                        self.conns.push(conn);
+                        self.conns.push(ProducerConn { broadcast_address: nsqd.broadcast_address.clone(), tcp_port: nsqd.tcp_port, conn });
                     }
                 }
             }
@@ -119,17 +127,35 @@ impl Producer {
 
     }
 
-    pub async fn produce(&self, topic: &str, message: &str, opts: ProducerConfig) {
+    pub async fn produce(&self, topic: &str, message: &str) -> Result<()> {
 
+        Ok(())
     }
 
-    async fn produce_once(&self, topic: &str, message: &str, opts: ProducerConfig) {
-
+    async fn produce_once(&self, topic: &str, message: &str) {
+        match self.opts.strategy {
+            ProducerStrategy::RoundRobin => {
+                
+            },
+            ProducerStrategy::FanOut => {
+                
+            }
+        }
     }
 
     pub fn close_all(&self) {
-
+        
     }
 
-    
+}
+
+pub fn index_of_connection(conns: &Vec<ProducerConn>, nsqd_host: &str, nsqd_port: u16) -> Option<usize> {
+    let mut index: Option<usize> = None;
+    for (i, conn) in conns.iter().enumerate() {
+        if conn.broadcast_address == nsqd_host && conn.tcp_port == nsqd_port {
+            index = Some(i);
+            break;
+        }
+    }
+    index
 }

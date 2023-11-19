@@ -1,9 +1,6 @@
 use reqwest::{Client, Response, Error};
 use super::helper::*;
 
-pub struct NsqdConfig {
-
-}
 #[derive(Clone)]
 pub struct Nsqd {
     instance: Client,

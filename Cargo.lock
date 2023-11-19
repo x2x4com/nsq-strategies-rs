@@ -628,8 +628,10 @@ dependencies = [
 name = "nsq-strategies-rs"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "reqwest",
  "serde_json",
+ "thiserror",
  "tokio",
  "tokio-nsq",
 ]
