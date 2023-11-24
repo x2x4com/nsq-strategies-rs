@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_variables)]
 use std::sync::{Arc, Mutex};
-use tokio_nsq::{NSQProducerConfig, NSQProducer, NSQEvent, NSQConfigShared};
-use anyhow::Result;
+use tokio_nsq::{NSQProducerConfig, NSQProducer, NSQEvent, NSQConfigShared, NSQTopic};
+use anyhow::{Result, anyhow};
 
 use crate::api::{nsqd::Nsqd, lookupd_cluster::LookupdCluster};
 
@@ -30,7 +30,7 @@ pub struct ProducerConn {
 #[derive(Clone, Debug)]
 pub struct ProducerConfig {
     pub strategy: ProducerStrategy,
-    pub retry: Option<u8>,
+    pub retry: u8,
     pub delay: u32,
     pub max_fanout_nodes: Option<u32>,
     pub max_inflight: Option<u32>,
@@ -43,7 +43,7 @@ impl Default for ProducerConfig {
     fn default() -> Self {
         ProducerConfig {
             strategy: ProducerStrategy::RoundRobin,
-            retry: Some(3),
+            retry: 3,
             delay: 0,
             max_fanout_nodes: None,
             max_inflight: Some(10),
@@ -86,28 +86,29 @@ impl Producer {
         }
     }
 
-    pub async fn connect(&mut self) {
+    pub async fn connect(&mut self) -> Result<()> {
         match self.lookup_cluster {
             Some(ref lookup_cluster) => {
                 
                 for node in lookup_cluster.nodes().await {
-                    if let Some(conn) = self.connect_nsqd(node.broadcast_address.as_str(), node.tcp_port, None).await {
-                        self.conns.push(ProducerConn { broadcast_address: node.broadcast_address.clone(), tcp_port: node.tcp_port, conn });
-                    }
+                    let conn = self.connect_nsqd(node.broadcast_address.as_str(), node.tcp_port, None).await?;
+                    self.conns.push(ProducerConn { broadcast_address: node.broadcast_address.clone(), tcp_port: node.tcp_port, conn });
+                    
                 }
 
             },
             None => {
                 if let Some(nsqd) = self.nsqd.as_ref() {
-                    if let Some(conn) = self.connect_nsqd(nsqd.broadcast_address.as_str(), nsqd.tcp_port, None).await {
-                        self.conns.push(ProducerConn { broadcast_address: nsqd.broadcast_address.clone(), tcp_port: nsqd.tcp_port, conn });
-                    }
+                    let conn = self.connect_nsqd(nsqd.broadcast_address.as_str(), nsqd.tcp_port, None).await?;
+                    self.conns.push(ProducerConn { broadcast_address: nsqd.broadcast_address.clone(), tcp_port: nsqd.tcp_port, conn });
                 }
             }
         }
+
+        Ok(())
     }
 
-    async fn connect_nsqd(&self, nsqd_host: &str, nsqd_port: u16, opts: Option<NSQConfigShared>) -> Option<NSQProducer> {
+    async fn connect_nsqd(&self, nsqd_host: &str, nsqd_port: u16, opts: Option<NSQConfigShared>) -> Result<NSQProducer> {
         // https://docs.rs/tokio-nsq/latest/tokio_nsq/struct.NSQProducer.html
         let mut producer: NSQProducer;
         if let Some(opts) = opts {
@@ -116,35 +117,75 @@ impl Producer {
             producer = NSQProducerConfig::new(format!("{}:{}", nsqd_host, nsqd_port)).build();
         }
         if let NSQEvent::Healthy() = producer.consume().await.unwrap() {
-            Some(producer)
+            Ok(producer)
         } else {
-            None
+            Err(anyhow::anyhow!("Failed to connect to nsqd"))
         }
         
     }
 
-    fn reconnect_nsqd(&self, nsqd_host: &str, nsqd_port: u16, opts: Option<NSQConfigShared>) {
-
-    }
-
-    pub async fn produce(&self, topic: &str, message: &str) -> Result<()> {
-
-        Ok(())
-    }
-
-    async fn produce_once(&self, topic: &str, message: &str) {
-        match self.opts.strategy {
-            ProducerStrategy::RoundRobin => {
-                
-            },
-            ProducerStrategy::FanOut => {
-                
+    async fn reconnect_nsqd(&mut self, nsqd_host: &str, nsqd_port: u16, opts: Option<NSQConfigShared>) -> Result<()> {
+        if self.is_closed {
+            return Err(anyhow!("Connection is closed"))
+        }
+        let mut _c: u8 = 0;
+        if let Some(idx) = index_of_connection(&self.conns, nsqd_host, nsqd_port) {
+            while _c < self.opts.retry {
+                 
+                match self.connect_nsqd(nsqd_host, nsqd_port, opts.clone()).await {
+                    Ok(producer) => {
+                        self.conns[idx].conn = producer;
+                        return Ok(())
+                    }
+                    Err(_) => {}
+                }
+                _c += 1;
             }
+        } else {
+            return Err(anyhow!(format!("Failed to get index for {}:{}", nsqd_host, nsqd_port)))
         }
+        Err(anyhow!(format!("Failed to connect to nsqd, retries {}", _c)))
     }
 
-    pub fn close_all(&self) {
+    pub async fn produce(&mut self, topic: &str, message: &str) -> Result<()> {
+        if self.is_closed {
+            return Err(anyhow!("Connection is closed"))
+        }
+        if let Some(topic_target) =  NSQTopic::new(topic) {
+            match self.opts.strategy {
+                ProducerStrategy::RoundRobin => {
+                    let mut counter = self.counter.lock().unwrap();
+                    let idx = (*counter % self.conns.len() as u64) as usize;
+                    let mut _c: u8 = 0;
+                    while _c < self.opts.retry {
+                        match self.conns[idx].conn.publish(&topic_target, message.to_string().into_bytes()).await {
+                            Ok(_) => {
+                                *counter += 1;
+                                return Ok(())
+                            }
+                            Err(_) => {
+                                _c +=1
+                            }
+                        }
+                    }
+                    return Err(anyhow!(format!("Failed to publish message, retries {}", _c)));
+                },
+                ProducerStrategy::FanOut => {
+                    // not support retry, todo 
+                }
+            
+            }
+            Ok(())
+        } else {
+            Err(anyhow!("Invalid topic name"))
+        }
         
+        
+    }
+
+    pub fn close_all(&self) -> Result<()> {
+        
+        Ok(())
     }
 
 }
