@@ -1,5 +1,5 @@
 #![allow(dead_code, unused_variables)]
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, borrow::BorrowMut};
 use tokio_nsq::{NSQProducerConfig, NSQProducer, NSQEvent, NSQConfigShared, NSQTopic};
 use anyhow::{Result, anyhow};
 
@@ -152,10 +152,10 @@ impl Producer {
             return Err(anyhow!("Connection is closed"))
         }
         if let Some(topic_target) =  NSQTopic::new(topic) {
+            let mut counter = self.counter.lock().unwrap();
+            let idx = (*counter % self.conns.len() as u64) as usize;
             match self.opts.strategy {
                 ProducerStrategy::RoundRobin => {
-                    let mut counter = self.counter.lock().unwrap();
-                    let idx = (*counter % self.conns.len() as u64) as usize;
                     let mut _c: u8 = 0;
                     while _c < self.opts.retry {
                         match self.conns[idx].conn.publish(&topic_target, message.to_string().into_bytes()).await {
@@ -170,8 +170,23 @@ impl Producer {
                     }
                     return Err(anyhow!(format!("Failed to publish message, retries {}", _c)));
                 },
+                
                 ProducerStrategy::FanOut => {
-                    // not support retry, todo 
+                    let mut _max: u32;
+                    if let Some(v) = self.opts.max_fanout_nodes {
+                        _max = v;
+                    } else {
+                        _max = self.conns.len() as u32;
+                    }
+                    if idx > _max as usize {
+                        _max += idx as u32;
+                    }
+
+                    for c in self.conns[idx.._max as usize].as_mut()  {
+                        let _ = c.conn.publish(&topic_target, message.to_string().into_bytes()).await;
+                    }
+                    
+                    *counter += 1;
                 }
             
             }
